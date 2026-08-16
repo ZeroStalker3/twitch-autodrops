@@ -1,0 +1,54 @@
+name: Build & Release UserScript
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Verify @version matches tag
+        run: |
+          FILE_VERSION=$(grep -oP '@version\s+\K[0-9]+\.[0-9]+\.[0-9]+' src/twitch-autodrops.user.js)
+          TAG_VERSION=${GITHUB_REF_NAME#v}
+          if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
+            echo "❌ Version mismatch: src=$FILE_VERSION, tag=$TAG_VERSION"
+            exit 1
+          fi
+
+      - name: Minify UserScript
+        run: |
+          mkdir -p dist
+          npx terser src/twitch-autodrops.user.js \
+            --compress drop_console=true \
+            --mangle reserved=['state','CONFIG'] \
+            --output dist/twitch-autodrops.min.user.js \
+            --comments '/^==UserScript==|@/'
+
+      - name: Update @version in minified file
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          sed -i "s/@version.*/@version      $VERSION/" dist/twitch-autodrops.min.user.js
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/twitch-autodrops.min.user.js
+          generate_release_notes: true
+          draft: false
