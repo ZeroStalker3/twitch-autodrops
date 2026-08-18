@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Auto Farm Drops
 // @namespace    https://github.com/ZeroStalker3/twitch-autodrops
-// @version      2.0.0
+// @version      2.1.0
 // @description  Полная автоматизация фарма Twitch Drops: надежная логика, защита от ошибок, точный таймер
 // @author       ZeroYz
 // @match        *://*.twitch.tv/*
@@ -421,8 +421,13 @@
 
     const isWhitelisted = (game, company) => {
         if (!CONFIG.whitelist.length) return true;
-        const wl = CONFIG.whitelist.map(norm);
-        return wl.includes(norm(game)) || wl.includes(norm(company));
+        const g = norm(game);
+        const c = norm(company);
+        return CONFIG.whitelist.some((w) => {
+            const nw = norm(w);
+            if (!nw) return false;
+            return (g && (g.includes(nw) || nw.includes(g))) || (c && (c.includes(nw) || nw.includes(c)));
+        });
     };
     
     const getDropInfo = (btn) => {
@@ -458,17 +463,6 @@
                 continue;
             }
             
-            if (!isWhitelisted(gameName, '')) {
-                log(`Блок ${i}: ${gameName} не в whitelist`, 'info');
-                continue;
-            }
-            
-            if (farm.done.includes(gameName) || isDoneGlobal(gameName)) {
-                log(`Блок ${i}: ${gameName} уже выбита`, 'info');
-                continue;
-            }
-            
-            // Ссылка на категорию
             const categoryLink = block.querySelector('a[href*="/directory/category/"]');
             if (!categoryLink) {
                 log(`Блок ${i}: не найдена ссылка на категорию`, 'warn');
@@ -481,12 +475,23 @@
                 continue;
             }
             const slug = slugMatch[1];
+            const slugName = slug.replace(/-/g, ' '); // "marvel-rivals" -> "marvel rivals"
             
-            // Прогресс-бары
+            // Whitelist по названию кампании ИЛИ по имени категории
+            if (!isWhitelisted(gameName, '') && !isWhitelisted(slugName, '')) {
+                log(`Блок ${i}: ${gameName} (${slugName}) не в whitelist`, 'info');
+                continue;
+            }
+            
+            if (farm.done.includes(gameName) || isDoneGlobal(gameName) || farm.done.includes(slugName) || isDoneGlobal(slugName)) {
+                log(`Блок ${i}: ${gameName} уже выбита`, 'info');
+                continue;
+            }
+                        // Прогресс-бары
             const progressBars = block.querySelectorAll('[role="progressbar"][aria-valuenow]');
-            let maxPct = 0;
-            let minRemMin = Infinity;
-            let foundDrop = false;
+            let targetRemMin = Infinity;
+            let targetPct = 0;
+            let foundActiveDrop = false;
             
             log(`Блок ${i}: ${gameName} - прогресс-баров: ${progressBars.length}`, 'info');
             
@@ -499,7 +504,6 @@
                 
                 const timeMatch = text.match(/от\s+(\d+)\s*(часа|час|минут|мин)/i);
                 if (timeMatch) {
-                    foundDrop = true;
                     const total = parseInt(timeMatch[1], 10);
                     const unit = timeMatch[2].toLowerCase();
                     const totalMin = unit.startsWith('час') ? total * 60 : total;
@@ -507,22 +511,29 @@
                     
                     log(`    Время: ${totalMin} мин, осталось: ${remainingMin.toFixed(1)} мин`, 'info');
                     
-                    if (pct > maxPct) maxPct = pct;
-                    if (remainingMin < minRemMin) minRemMin = remainingMin;
+                    // Нас интересует только тот конкретный дроп, который еще не выбит (< 100%) и время > 0
+                    if (pct < 100 && remainingMin > 0) {
+                        foundActiveDrop = true;
+                        // Выбираем дроп, до которого осталось меньше всего времени
+                        if (remainingMin < targetRemMin) {
+                            targetRemMin = remainingMin;
+                            targetPct = pct;
+                        }
+                    }
                 }
             }
             
-            if (foundDrop && maxPct < 100 && minRemMin !== Infinity) {
+            if (foundActiveDrop && targetRemMin !== Infinity) {
                 campaigns.push({
                     game: gameName,
                     slug,
-                    watchTime: minRemMin * 60,
-                    currentPct: maxPct,
-                    remainingMin: minRemMin
+                    watchTime: targetRemMin * 60,
+                    currentPct: targetPct,
+                    remainingMin: targetRemMin
                 });
-                log(`  ДОБАВЛЕНО: ${gameName}, ${slug}, ${maxPct}%, ${minRemMin.toFixed(1)} мин`, 'success');
-            } else if (!foundDrop) {
-                log(`Блок ${i}: не найдено времени`, 'warn');
+                log(`  ✅ ДОБАВЛЕНО: ${gameName}, ${slug}, ${targetPct}%, осталось ${targetRemMin.toFixed(1)} мин`, 'success');
+            } else if (!foundActiveDrop) {
+                log(`Блок ${i}: все дропы в этой кампании уже выбиты`, 'info');
             }
         }
         
@@ -598,11 +609,20 @@
     };
 
     const ensureDropsPanel = () => {
-        if (rt.panelTried) return;
+        const body = document.body.textContent || '';
+        const isOpen = /drops и прочее|drops and more|drops для подписки/i.test(body);
         
-        const btn = document.querySelector('[data-a-target="drops-overlay-button"], button[aria-label*="drops" i]');
-        rt.panelTried = true;
-        if (btn) btn.click();
+        if (isOpen) return true; 
+        
+        const btn = document.querySelector('[data-a-target="drops-overlay-button"], button[aria-label*="drops" i], button[aria-label*="дроп" i]');
+        if (btn) {
+            btn.click();
+            log('Панель Drops открыта', 'info');
+            return true;
+        }
+        
+        log('Кнопка Drops не найдена', 'warn');
+        return false;
     };
 
     let scanBusy = false;
@@ -830,6 +850,7 @@
             await sleep(1000);
             ensureDropsPanel();
             await sleep(1000);
+            await sleep(1500); 
             
             const drops = checkActiveDrops();
             
@@ -902,8 +923,9 @@
             const needSync = now - rt.lastSync > 120000 || rt.domRemaining === null || rt.domRemaining <= 1;
             
             if (needSync) {
+                rt.panelTried = false;
                 ensureDropsPanel();
-                await sleep(500);
+                await sleep(1000); 
                 const drops = checkActiveDrops();
                 rt.lastSync = now;
                 
@@ -973,8 +995,26 @@
     };
 
     const onInventory = async () => {
-        log('Проверка наград в инвентаре...', 'farm');
-        await sleep(3000);
+        log('Проверка инвентаря...', 'farm');
+        await sleep(2000);
+
+        // СНАЧАЛА проверяем активные дропы в инвентаре
+        const campaigns = parseInventory();
+        
+        if (campaigns.length > 0) {
+            log(`Найдено активных дропов: ${campaigns.length}`, 'farm');
+            farm.queue = campaigns;
+            farm.tried = {};
+            farm.phase = 'dir';
+            saveFarm();
+            updateQueue();
+            nextFromQueue();
+            return;
+        }
+
+        // Если активных нет, проверяем наград для получения
+        log('Нет активных дропов, проверяю награды...', 'info');
+        await sleep(1000);
 
         const btns = [
             ...document.querySelectorAll('button[data-a-target="claim-drop-button"], button[data-a-target="DropsClaimButton"]'),
@@ -995,26 +1035,11 @@
         if (n) {
             log(`Получено наград: ${n}`, 'claim');
             toast(`🎁 Получено наград: ${n}`);
-        } else {
-            log('Нет наград для получения', 'info');
         }
         
-        // После клейма проверяем инвентарь на активные дропы
-        await sleep(2000);
-        const campaigns = parseInventory();
-        
-        if (campaigns.length > 0) {
-            log(`Найдено активных дропов: ${campaigns.length}`, 'farm');
-            farm.queue = campaigns;
-            farm.tried = {};
-            farm.phase = 'dir';
-            saveFarm();
-            updateQueue();
-            nextFromQueue();
-        } else {
-            log('Нет активных дропов — сканирую кампании', 'info');
-            go(CAMPAIGNS_URL);
-        }
+        // После клейма идем на кампании
+        log('Перехожу на страницу кампаний...', 'info');
+        setTimeout(() => go(CAMPAIGNS_URL), 2000);
     };
 
     let tickBusy = false;
