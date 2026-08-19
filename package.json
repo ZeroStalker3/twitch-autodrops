@@ -1,7 +1,7 @@
 {
   "name": "twitch-autodrops",
   "private": true,
-  "version": "2.1.0",
+  "version": "2.2.0",
   "scripts": {
     "release:patch": "npm version patch --no-git-tag-version && node sync-version.js && git add . && git commit -m \"chore: bump to v$(node -p \"require('./package.json').version\")\" && git tag v$(node -p \"require('./package.json').version\") && git push && git push --tags",
     "release:minor": "npm version minor --no-git-tag-version && node sync-version.js && git add . && git commit -m \"chore: bump to v$(node -p \"require('./package.json').version\")\" && git tag v$(node -p \"require('./package.json').version\") && git push && git push --tags",

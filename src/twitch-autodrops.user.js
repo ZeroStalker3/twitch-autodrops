@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Auto Farm Drops
 // @namespace    https://github.com/ZeroStalker3/twitch-autodrops
-// @version      2.1.0
+// @version      2.2.0
 // @description  Полная автоматизация фарма Twitch Drops: надежная логика, защита от ошибок, точный таймер
 // @author       ZeroYz
 // @match        *://*.twitch.tv/*
@@ -568,7 +568,15 @@
         );
         
         if (!watchSection) {
-            return { hasWatchDrops: false, rem: null, pct: null };
+            return { hasWatchDrops: false, rem: null, pct: null, claimReady: false };
+        }
+        
+        // Проверяем наличие кнопки "Получить"
+        const claimBtn = [...document.querySelectorAll('[data-a-target="tw-core-button-label-text"]')]
+            .find(el => /получить|claim/i.test(el.textContent || ''));
+        
+        if (claimBtn) {
+            return { hasWatchDrops: true, rem: 0, pct: 100, claimReady: true };
         }
         
         const dropCard = [...document.querySelectorAll('p[title]')].find(p => {
@@ -578,7 +586,7 @@
         });
         
         if (!dropCard) {
-            return { hasWatchDrops: false, rem: null, pct: null };
+            return { hasWatchDrops: false, rem: null, pct: null, claimReady: false };
         }
         
         const title = dropCard.title || dropCard.textContent;
@@ -605,7 +613,7 @@
             }
         }
         
-        return { hasWatchDrops: true, rem, pct };
+        return { hasWatchDrops: true, rem, pct, claimReady: false };
     };
 
     const ensureDropsPanel = () => {
