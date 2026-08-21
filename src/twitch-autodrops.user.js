@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Auto Farm Drops
 // @namespace    https://github.com/ZeroStalker3/twitch-autodrops
-// @version      2.3.0
+// @version      2.4.0
 // @description  Полная автоматизация фарма Twitch Drops: надежная логика, защита от ошибок, точный таймер
 // @author       ZeroYz
 // @match        *://*.twitch.tv/*
