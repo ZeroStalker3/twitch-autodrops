@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Auto Farm Drops
 // @namespace    https://github.com/ZeroStalker3/twitch-autodrops
-// @version      2.2.0
+// @version      2.3.0
 // @description  Полная автоматизация фарма Twitch Drops: надежная логика, защита от ошибок, точный таймер
 // @author       ZeroYz
 // @match        *://*.twitch.tv/*
@@ -447,14 +447,12 @@
         const campaigns = [];
         log('Парсинг инвентаря...', 'info');
         
-        // Ищем все блоки кампаний "В процессе"
         const campaignBlocks = document.querySelectorAll('.Layout-sc-1xcs6mc-0.hStHhY');
         log(`Найдено блоков кампаний: ${campaignBlocks.length}`, 'info');
         
         for (let i = 0; i < campaignBlocks.length; i++) {
             const block = campaignBlocks[i];
             
-            // Название игры/кампании
             const gameLink = block.querySelector('.CoreText-sc-1txzju1-0.jOVLCv a');
             const gameName = gameLink?.textContent?.trim() || '';
             
@@ -463,7 +461,27 @@
                 continue;
             }
             
-            const categoryLink = block.querySelector('a[href*="/directory/category/"]');
+            // Ищем категорию и конкретные каналы
+            let categoryLink = block.querySelector('a[href*="/directory/category/"]');
+            const hintText = block.querySelector('[data-test-selector="DropsCampaignInProgressDescription-hint-text-parent"]');
+            
+            // Извлекаем список конкретных каналов
+            const specificChannels = [];
+            if (hintText) {
+                const allLinks = hintText.querySelectorAll('a[href]');
+                for (const link of allLinks) {
+                    const href = link.getAttribute('href');
+                    // Ищем ссылки вида /channelname или https://www.twitch.tv/channelname
+                    const match = href.match(/twitch\.tv\/([^?/]+)|\/([^?/]+)$/);
+                    if (match) {
+                        const channel = match[1] || match[2];
+                        if (channel && !channel.includes('directory')) {
+                            specificChannels.push(channel);
+                        }
+                    }
+                }
+            }
+            
             if (!categoryLink) {
                 log(`Блок ${i}: не найдена ссылка на категорию`, 'warn');
                 continue;
@@ -475,23 +493,24 @@
                 continue;
             }
             const slug = slugMatch[1];
-            const slugName = slug.replace(/-/g, ' '); // "marvel-rivals" -> "marvel rivals"
+            const slugName = slug.replace(/-/g, ' ');
             
-            // Whitelist по названию кампании ИЛИ по имени категории
+            if (specificChannels.length > 0) {
+                log(`Блок ${i}: найдено каналов: ${specificChannels.join(', ')}`, 'info');
+            }
+            
+            // Whitelist
             if (!isWhitelisted(gameName, '') && !isWhitelisted(slugName, '')) {
                 log(`Блок ${i}: ${gameName} (${slugName}) не в whitelist`, 'info');
                 continue;
             }
             
-            if (farm.done.includes(gameName) || isDoneGlobal(gameName) || farm.done.includes(slugName) || isDoneGlobal(slugName)) {
-                log(`Блок ${i}: ${gameName} уже выбита`, 'info');
-                continue;
-            }
-                        // Прогресс-бары
+            // Проверяем реальный прогресс вместо farm.done
             const progressBars = block.querySelectorAll('[role="progressbar"][aria-valuenow]');
             let targetRemMin = Infinity;
             let targetPct = 0;
             let foundActiveDrop = false;
+            let allCompleted = true;
             
             log(`Блок ${i}: ${gameName} - прогресс-баров: ${progressBars.length}`, 'info');
             
@@ -511,29 +530,37 @@
                     
                     log(`    Время: ${totalMin} мин, осталось: ${remainingMin.toFixed(1)} мин`, 'info');
                     
-                    // Нас интересует только тот конкретный дроп, который еще не выбит (< 100%) и время > 0
                     if (pct < 100 && remainingMin > 0) {
                         foundActiveDrop = true;
-                        // Выбираем дроп, до которого осталось меньше всего времени
+                        allCompleted = false;
                         if (remainingMin < targetRemMin) {
                             targetRemMin = remainingMin;
                             targetPct = pct;
                         }
+                    } else if (pct >= 100) {
+                        // Этот дроп завершен, но могут быть другие
                     }
                 }
+            }
+            
+            if (allCompleted) {
+                log(`Блок ${i}: ${gameName} - все дропы завершены`, 'info');
+                continue;
             }
             
             if (foundActiveDrop && targetRemMin !== Infinity) {
                 campaigns.push({
                     game: gameName,
                     slug,
+                    channels: specificChannels, // Добавляем список каналов
                     watchTime: targetRemMin * 60,
                     currentPct: targetPct,
                     remainingMin: targetRemMin
                 });
-                log(`  ✅ ДОБАВЛЕНО: ${gameName}, ${slug}, ${targetPct}%, осталось ${targetRemMin.toFixed(1)} мин`, 'success');
+                const channelsInfo = specificChannels.length ? `, каналы: ${specificChannels.join(', ')}` : '';
+                log(`  ✅ ДОБАВЛЕНО: ${gameName}, ${slug}, ${targetPct}%, осталось ${targetRemMin.toFixed(1)} мин${channelsInfo}`, 'success');
             } else if (!foundActiveDrop) {
-                log(`Блок ${i}: все дропы в этой кампании уже выбиты`, 'info');
+                log(`Блок ${i}: не найдено активного времени`, 'warn');
             }
         }
         
@@ -733,11 +760,30 @@
         return v;
     };
     
-    const parseStreams = () => {
+    const parseStreams = (preferredChannels = []) => {
         const scope = document.querySelector('main') || document;
         const out = [];
         const seen = new Set();
         
+        // Если есть предпочтительные каналы, ищем их в первую очередь
+        if (preferredChannels.length > 0) {
+            for (const channel of preferredChannels) {
+                if (seen.has(channel)) continue;
+                
+                // Ищем карточку канала
+                const channelLink = scope.querySelector(`a[href="/${channel}"]`);
+                if (channelLink) {
+                    const card = channelLink.closest('article') || channelLink.parentElement?.parentElement;
+                    if (card && card.querySelector('img, video')) {
+                        seen.add(channel);
+                        const viewers = parseViewers(card);
+                        out.push({ url: `https://www.twitch.tv/${channel}`, viewers, isPreferred: true });
+                    }
+                }
+            }
+        }
+        
+        // Ищем остальные стримы
         for (const a of scope.querySelectorAll('a[href]')) {
             if (a.closest('nav,aside,footer,[data-a-target="side-nav"]')) continue;
             
@@ -751,10 +797,15 @@
             if (!card || !card.querySelector('img, video')) continue;
             
             seen.add(slug);
-            out.push({ url: 'https://www.twitch.tv/' + slug, viewers: parseViewers(card) });
+            out.push({ url: 'https://www.twitch.tv/' + slug, viewers: parseViewers(card), isPreferred: false });
         }
         
-        return out.sort((a, b) => b.viewers - a.viewers);
+        // Сортируем: сначала предпочтительные каналы, потом по зрителям
+        return out.sort((a, b) => {
+            if (a.isPreferred && !b.isPreferred) return -1;
+            if (!a.isPreferred && b.isPreferred) return 1;
+            return b.viewers - a.viewers;
+        });
     };
     
     const onDirectory = async () => {
@@ -767,11 +818,13 @@
         
         log(`Поиск стримов: ${farm.current.game}`, 'farm');
         
-        for (let i = 0; i < 6 && !parseStreams().length; i++) {
+        const channels = farm.current.channels || [];
+        
+        for (let i = 0; i < 6 && !parseStreams(channels).length; i++) {
             await sleep(2000);
         }
         
-        let streams = parseStreams();
+        let streams = parseStreams(channels);
         const withV = streams.filter(s => s.viewers > 0);
         if (withV.length) streams = withV.filter(s => s.viewers >= CONFIG.minViewers);
         
