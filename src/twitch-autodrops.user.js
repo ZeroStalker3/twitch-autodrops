@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Auto Farm Drops
 // @namespace    https://github.com/ZeroStalker3/twitch-autodrops
-// @version      2.4.0
+// @version      2.4.1
 // @description  Полная автоматизация фарма Twitch Drops: надежная логика, защита от ошибок, точный таймер
 // @author       ZeroYz
 // @match        *://*.twitch.tv/*
@@ -1098,7 +1098,6 @@
             toast(`🎁 Получено наград: ${n}`);
         }
         
-        // После клейма идем на кампании
         log('Перехожу на страницу кампаний...', 'info');
         setTimeout(() => go(CAMPAIGNS_URL), 2000);
     };
