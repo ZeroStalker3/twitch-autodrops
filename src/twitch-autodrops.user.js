@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Auto Farm Drops
 // @namespace    https://github.com/ZeroStalker3/twitch-autodrops
-// @version      2.4.1
+// @version      2.4.2
 // @description  Полная автоматизация фарма Twitch Drops: надежная логика, защита от ошибок, точный таймер
 // @author       ZeroYz
 // @match        *://*.twitch.tv/*
@@ -461,16 +461,15 @@
                 continue;
             }
             
-            // Ищем категорию и конкретные каналы
             let categoryLink = block.querySelector('a[href*="/directory/category/"]');
             const hintText = block.querySelector('[data-test-selector="DropsCampaignInProgressDescription-hint-text-parent"]');
             
-            // Извлекаем список конкретных каналов
             const specificChannels = [];
             if (hintText) {
                 const allLinks = hintText.querySelectorAll('a[href]');
                 for (const link of allLinks) {
                     const href = link.getAttribute('href');
+                    
                     // Ищем ссылки вида /channelname или https://www.twitch.tv/channelname
                     const match = href.match(/twitch\.tv\/([^?/]+)|\/([^?/]+)$/);
                     if (match) {
@@ -871,6 +870,30 @@
             rt.countdownInterval = null;
         }
         
+        const streamClaimBtn = [...document.querySelectorAll('[data-a-target="tw-core-button-label-text"]')]
+            .find(el => /^получить$/i.test((el.textContent || '').trim()));
+        
+        if (streamClaimBtn) {
+            const parentBtn = streamClaimBtn.closest('button, a');
+            if (parentBtn) {
+                parentBtn.click();
+                stats.claimed++;
+                saveStats();
+                updateStats();
+                log(`🎁 Дроп получен на стриме: ${farm.current?.game}`, 'success');
+                toast(`🎁 Получен дроп: ${farm.current?.game || ''}`);
+                
+                if (farm.current && !farm.done.includes(farm.current.game)) {
+                    farm.done.push(farm.current.game);
+                }
+                if (farm.current) doneSet(farm.current.game);
+                saveFarm();
+                
+                setTimeout(() => nextFromQueue(), 2000);
+                return;
+            }
+        }
+        
         if (farm.current && !farm.done.includes(farm.current.game)) {
             farm.done.push(farm.current.game);
         }
@@ -901,6 +924,22 @@
             if (video) {
                 video.muted = CONFIG.muted;
                 video.play().catch(() => {});
+                
+                video.addEventListener('pause', () => {
+                    if (isRunning() && farm.phase === 'watch') {
+                        log('Видео поставлено на паузу - возобновляем', 'warn');
+                        setTimeout(() => {
+                            if (video.paused) video.play().catch(() => {});
+                        }, 1000);
+                    }
+                });
+                
+                video.addEventListener('ended', () => {
+                    if (isRunning() && farm.phase === 'watch') {
+                        log('Видео закончилось - перезапускаем', 'warn');
+                        video.play().catch(() => {});
+                    }
+                });
             }
             
             const overlay = document.querySelector('button[aria-label*="Play" i], [data-a-target="player-overlay-click-handler"]');
@@ -1027,7 +1066,7 @@
             }
         }
         
-        if (!rt.lastActivity || Date.now() - rt.lastActivity > 180000) {
+        if (!rt.lastActivity || Date.now() - rt.lastActivity > 120000) {
             rt.lastActivity = Date.now();
             
             const video = document.querySelector('video');
@@ -1050,6 +1089,10 @@
                     video.dispatchEvent(new Event('timeupdate', { bubbles: true }));
                 }
                 
+                if (video.paused || video.ended) {
+                    video.play().catch(() => {});
+                }
+                
                 log('Активность эмулирована', 'info');
             }
         }
@@ -1064,6 +1107,10 @@
         
         if (campaigns.length > 0) {
             log(`Найдено активных дропов: ${campaigns.length}`, 'farm');
+            
+            // ПЕРЕД фармом пробуем забрать готовые дропы
+            await tryClaimReadyDrops();
+            
             farm.queue = campaigns;
             farm.tried = {};
             farm.phase = 'dir';
@@ -1073,33 +1120,58 @@
             return;
         }
 
-        // Если активных нет, проверяем наград для получения
+        // Если активных нет, проверяем награды для получения
         log('Нет активных дропов, проверяю награды...', 'info');
         await sleep(1000);
-
-        const btns = [
+        
+        await tryClaimReadyDrops();
+        
+        // После клейма идем на кампании
+        log('Перехожу на страницу кампаний...', 'info');
+        setTimeout(() => go(CAMPAIGNS_URL), 2000);
+    };
+    
+    // ===== КЛЕЙМ ГОТОВЫХ ДРОПОВ В ИНВЕНТАРЕ =====
+    const tryClaimReadyDrops = async () => {
+        let claimed = 0;
+        
+        // 1. Кнопки "Получить сейчас" (новые, прямо в инвентаре)
+        const claimNowBtns = [...document.querySelectorAll('button')]
+            .filter(b => /получить сейчас|claim now/i.test(b.textContent || ''));
+        
+        for (const btn of claimNowBtns) {
+            btn.click();
+            claimed++;
+            stats.claimed++;
+            log(`🎁 Дроп получен (Получить сейчас)`, 'success');
+            await sleep(1500);
+        }
+        
+        // 2. Стандартные кнопки "Получить" / "Claim"
+        const claimBtns = [
             ...document.querySelectorAll('button[data-a-target="claim-drop-button"], button[data-a-target="DropsClaimButton"]'),
-            ...[...document.querySelectorAll('button')].filter(b => ['получить', 'claim'].includes(norm(b.textContent)))
+            ...[...document.querySelectorAll('button')].filter(b => {
+                const text = (b.textContent || '').trim();
+                return /^(получить|claim)$/i.test(text);
+            })
         ];
         
-        let n = 0;
-        for (const b of btns) {
+        for (const b of claimBtns) {
             b.click();
-            n++;
+            claimed++;
             stats.claimed++;
             await sleep(1200);
         }
         
-        saveStats();
-        updateStats();
-        
-        if (n) {
-            log(`Получено наград: ${n}`, 'claim');
-            toast(`🎁 Получено наград: ${n}`);
+        if (claimed > 0) {
+            saveStats();
+            updateStats();
+            log(`Получено наград: ${claimed}`, 'claim');
+            toast(`🎁 Получено наград: ${claimed}`);
+            await sleep(2000); // Ждём обновления страницы
         }
         
-        log('Перехожу на страницу кампаний...', 'info');
-        setTimeout(() => go(CAMPAIGNS_URL), 2000);
+        return claimed;
     };
 
     let tickBusy = false;
@@ -1155,15 +1227,35 @@
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden && isRunning() && farm.phase === 'watch') {
             const video = document.querySelector('video');
-            if (video && (video.paused || video.ended)) {
-                log('Вкладка активна - возобновляем воспроизведение', 'info');
-                video.play().catch(() => {});
+            if (video) {
+                log('Вкладка активна - проверяем видео', 'info');
+                if (video.paused || video.ended) {
+                    video.play().catch(() => {});
+                }
+                video.muted = CONFIG.muted;
             }
             rt.stuck = 0;
             rt.reloaded = false;
             updateFarmStatus();
         }
     });
+    
+    setInterval(() => {
+        if (isRunning() && farm.phase === 'watch') {
+            const video = document.querySelector('video');
+            if (video) {
+                // Если видео на паузе - запускаем принудительно
+                if (video.paused || video.ended) {
+                    log('Видео на паузе - возобновляем', 'info');
+                    video.play().catch(() => {});
+                }
+                // Убеждаемся что muted правильно
+                if (video.muted !== CONFIG.muted) {
+                    video.muted = CONFIG.muted;
+                }
+            }
+        }
+    }, 30000);
     
     setInterval(tick, 15000);
 
