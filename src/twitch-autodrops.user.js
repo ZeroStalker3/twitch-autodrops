@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Auto Farm Drops
 // @namespace    https://github.com/ZeroStalker3/twitch-autodrops
-// @version      2.4.2
+// @version      2.5.0
 // @description  Полная автоматизация фарма Twitch Drops: надежная логика, защита от ошибок, точный таймер
 // @author       ZeroYz
 // @match        *://*.twitch.tv/*
@@ -20,12 +20,12 @@
         streamRotationMin: 0,
         checkIntervalSec: 30,
         minViewers: 50,
-        autoStart: true,
         minimized: false,
         position: null,
         connectMode: 'notify',
         connectCooldownMin: 30,
-        muted: true
+        muted: true,
+        autoStart: false
     };
     
     const loadConfig = () => {
@@ -35,7 +35,6 @@
             return { ...DEFAULT_CONFIG };
         }
     };
-    
     
     let CONFIG = loadConfig();
     const saveConfig = () => localStorage.setItem(LS_KEY, JSON.stringify(CONFIG));
@@ -130,132 +129,137 @@
 
     const notifiedConnections = new Set();
 
-    // ===== GUI =====
+    // ===== GUI (переименованный в TAF) =====
     const style = document.createElement('style');
     style.textContent = `
-        #Twitchy-autoclicker{position:fixed;top:20px;right:20px;width:420px;background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);border:1px solid #2d4059;border-radius:12px;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;color:#fff;z-index:999999;box-shadow:0 8px 32px rgba(0,0,0,.5);overflow:hidden}
-        #Twitchy-header{background:linear-gradient(90deg,#5f3570 0%,#8e44ad 100%);padding:12px 16px;display:flex;justify-content:space-between;align-items:center;cursor:move;user-select:none}
-        #Twitchy-title{display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px}
-        #Twitchy-logo{width:20px;height:20px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:12px}
-        #Twitchy-controls{display:flex;gap:8px}
-        .Twitchy-btn{padding:6px 16px;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;transition:all .3s;text-transform:uppercase;letter-spacing:.5px}
-        #Twitchy-toggle{background:#27ae60;color:#fff}
-        #Twitchy-toggle:hover{background:#229954}
-        #Twitchy-toggle.running{background:#e74c3c}
-        #Twitchy-toggle.running:hover{background:#c0392b}
-        #Twitchy-hide,#Twitchy-minimize,#Twitchy-settings{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.3);padding:6px 12px}
-        #Twitchy-settings{padding:6px 10px;font-size:14px;line-height:1}
-        #Twitchy-hide:hover,#Twitchy-minimize:hover,#Twitchy-settings:hover{background:rgba(255,255,255,.1)}
-        #Twitchy-minimize{padding:6px 10px;font-size:16px;line-height:1}
-        #Twitchy-content{padding:16px}
-        #Twitchy-autoclicker.minimized #Twitchy-content,#Twitchy-autoclicker.minimized #Twitchy-footer{display:none}
-        #Twitchy-status{background:rgba(255,255,255,.05);border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;text-align:center}
-        #Twitchy-status-text{color:#95a5a6}
-        #Twitchy-status-text.active{color:#2ecc71;font-weight:600}
-        #Twitchy-uptime{font-size:11px;color:#95a5a6;margin-top:4px}
-        #Twitchy-farm-status{background:rgba(155,89,182,.1);border:1px solid rgba(155,89,182,.3);border-radius:8px;padding:12px;margin-bottom:12px}
-        #Twitchy-farm-status[hidden]{display:none}
-        .Twitchy-farm-game{font-size:14px;font-weight:700;color:#9b59b6;margin-bottom:6px}
-        .Twitchy-farm-stream{font-size:11px;color:#95a5a6;margin-bottom:8px;word-break:break-all}
-        .Twitchy-farm-progress{background:rgba(0,0,0,.3);border-radius:4px;height:20px;overflow:hidden;margin-bottom:6px}
-        .Twitchy-farm-progress-bar{background:linear-gradient(90deg,#9b59b6 0%,#8e44ad 100%);height:100%;transition:width .5s ease;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff}
-        .Twitchy-farm-time{font-size:11px;color:#95a5a6;text-align:center}
-        #Twitchy-queue{background:rgba(0,0,0,.2);border-radius:8px;padding:10px;margin-bottom:12px}
-        #Twitchy-queue[hidden]{display:none}
-        .Twitchy-queue-title{font-size:10px;color:#95a5a6;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
-        .Twitchy-queue-item{font-size:11px;color:#95a5a6;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)}
-        .Twitchy-queue-item:last-child{border-bottom:none}
-        #Twitchy-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
-        .Twitchy-stat{background:rgba(255,255,255,.05);border-radius:8px;padding:10px;text-align:center}
-        .Twitchy-stat-label{font-size:10px;color:#95a5a6;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
-        .Twitchy-stat-value{font-size:20px;font-weight:700;color:#fff}
-        #Twitchy-connect{background:rgba(243,156,18,.08);border:1px solid rgba(243,156,18,.4);border-radius:8px;padding:10px 12px;margin-bottom:12px}
-        #Twitchy-connect[hidden]{display:none}
-        .Twitchy-connect-title{font-size:10px;color:#f39c12;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
-        .Twitchy-connect-row{display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:4px 0;color:#f39c12}
-        .Twitchy-connect-row a{color:#9b59b6;font-weight:600;text-decoration:none}
-        #Twitchy-settings-panel{background:rgba(0,0,0,.3);border-radius:8px;padding:12px;margin-bottom:12px}
-        #Twitchy-settings-panel[hidden]{display:none}
-        .Twitchy-field-label{font-size:10px;color:#95a5a6;text-transform:uppercase;letter-spacing:1px;margin:10px 0 6px;display:block}
-        .Twitchy-field-label:first-child{margin-top:0}
-        .Twitchy-input,.Twitchy-textarea{width:100%;box-sizing:border-box;background:rgba(0,0,0,.4);border:1px solid rgba(155,89,182,.3);border-radius:6px;color:#fff;padding:8px 10px;font:12px/1.4 'Consolas','Monaco',monospace}
-        .Twitchy-textarea{resize:vertical;min-height:64px}
-        .Twitchy-input:focus,.Twitchy-textarea:focus{outline:none;border-color:#9b59b6}
-        #Twitchy-save{width:100%;margin-top:10px;background:#9b59b6;color:#fff}
-        #Twitchy-save:hover{background:#8e44ad}
-        #Twitchy-log{background:rgba(0,0,0,.3);border-radius:8px;padding:12px;height:180px;overflow-y:auto;font-size:11px;font-family:'Consolas','Monaco',monospace}
-        .Twitchy-log-entry{padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05)}
-        .Twitchy-log-entry:last-child{border-bottom:none}
-        .Twitchy-log-time{color:#95a5a6;margin-right:8px}
-        .Twitchy-log-success{color:#2ecc71}
-        .Twitchy-log-info{color:#3498db}
-        .Twitchy-log-warning{color:#f39c12}
-        .Twitchy-log-system{color:#9b59b6}
-        .Twitchy-log-farm{color:#e67e22}
-        #Twitchy-footer{padding:12px 16px;background:rgba(0,0,0,.2);text-align:center;font-size:10px;color:#95a5a6}
-        #Twitchy-footer a{color:#9b59b6;text-decoration:none}
-        #Twitchy-log::-webkit-scrollbar{width:6px}
-        #Twitchy-log::-webkit-scrollbar-thumb{background:rgba(155,89,182,.5);border-radius:3px}
-        #Twitchy-fab{position:fixed;right:20px;bottom:20px;width:52px;height:52px;border:none;border-radius:50%;cursor:pointer;font-size:24px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);box-shadow:0 6px 20px rgba(0,0,0,.5);z-index:999999}
-        #Twitchy-fab[hidden]{display:none}
-        .Twitchy-toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);border:1px solid #f39c12;border-radius:8px;padding:10px 16px;color:#fff;font:12px 'Consolas','Monaco',monospace;box-shadow:0 6px 20px rgba(0,0,0,.5);z-index:9999999}
+        #TAF-panel{position:fixed;top:20px;left:20px;width:420px;background:linear-gradient(135deg,#0f3460 0%,#16213e 100%);border:1px solid #2d4059;border-radius:12px;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;color:#fff;z-index:999998;box-shadow:0 8px 32px rgba(0,0,0,.5);overflow:hidden}
+        #TAF-header{background:linear-gradient(90deg,#e94560 0%,#c73e54 100%);padding:12px 16px;display:flex;justify-content:space-between;align-items:center;cursor:move;user-select:none}
+        #TAF-title{display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px}
+        #TAF-logo{width:20px;height:20px;background:linear-gradient(135deg,#e94560 0%,#f27121 100%);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:12px}
+        #TAF-controls{display:flex;gap:8px}
+        .TAF-btn{padding:6px 16px;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;transition:all .3s;text-transform:uppercase;letter-spacing:.5px}
+        #TAF-toggle{background:#27ae60;color:#fff}
+        #TAF-toggle:hover{background:#229954}
+        #TAF-toggle.running{background:#e74c3c}
+        #TAF-toggle.running:hover{background:#c0392b}
+        #TAF-hide,#TAF-minimize,#TAF-settings{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.3);padding:6px 12px}
+        #TAF-settings{padding:6px 10px;font-size:14px;line-height:1}
+        #TAF-hide:hover,#TAF-minimize:hover,#TAF-settings:hover{background:rgba(255,255,255,.1)}
+        #TAF-minimize{padding:6px 10px;font-size:16px;line-height:1}
+        #TAF-content{padding:16px}
+        #TAF-panel.minimized #TAF-content,#TAF-panel.minimized #TAF-footer{display:none}
+        #TAF-status{background:rgba(255,255,255,.05);border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;text-align:center}
+        #TAF-status-text{color:#95a5a6}
+        #TAF-status-text.active{color:#2ecc71;font-weight:600}
+        #TAF-uptime{font-size:11px;color:#95a5a6;margin-top:4px}
+        #TAF-farm-status{background:rgba(233,69,96,.1);border:1px solid rgba(233,69,96,.3);border-radius:8px;padding:12px;margin-bottom:12px}
+        #TAF-farm-status[hidden]{display:none}
+        .TAF-farm-game{font-size:14px;font-weight:700;color:#e94560;margin-bottom:6px}
+        .TAF-farm-stream{font-size:11px;color:#95a5a6;margin-bottom:8px;word-break:break-all}
+        .TAF-farm-progress{background:rgba(0,0,0,.3);border-radius:4px;height:20px;overflow:hidden;margin-bottom:6px}
+        .TAF-farm-progress-bar{background:linear-gradient(90deg,#e94560 0%,#f27121 100%);height:100%;transition:width .5s ease;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff}
+        .TAF-farm-time{font-size:11px;color:#95a5a6;text-align:center}
+        #TAF-queue{background:rgba(0,0,0,.2);border-radius:8px;padding:10px;margin-bottom:12px}
+        #TAF-queue[hidden]{display:none}
+        .TAF-queue-title{font-size:10px;color:#95a5a6;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+        .TAF-queue-item{font-size:11px;color:#95a5a6;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+        .TAF-queue-item:last-child{border-bottom:none}
+        #TAF-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+        .TAF-stat{background:rgba(255,255,255,.05);border-radius:8px;padding:10px;text-align:center}
+        .TAF-stat-label{font-size:10px;color:#95a5a6;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+        .TAF-stat-value{font-size:20px;font-weight:700;color:#fff}
+        #TAF-connect{background:rgba(243,156,18,.08);border:1px solid rgba(243,156,18,.4);border-radius:8px;padding:10px 12px;margin-bottom:12px}
+        #TAF-connect[hidden]{display:none}
+        .TAF-connect-title{font-size:10px;color:#f39c12;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+        .TAF-connect-row{display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:4px 0;color:#f39c12}
+        .TAF-connect-row a{color:#e94560;font-weight:600;text-decoration:none}
+        #TAF-settings-panel{background:rgba(0,0,0,.3);border-radius:8px;padding:12px;margin-bottom:12px}
+        #TAF-settings-panel[hidden]{display:none}
+        .TAF-field-label{font-size:10px;color:#95a5a6;text-transform:uppercase;letter-spacing:1px;margin:10px 0 6px;display:block}
+        .TAF-field-label:first-child{margin-top:0}
+        .TAF-input,.TAF-textarea{width:100%;box-sizing:border-box;background:rgba(0,0,0,.4);border:1px solid rgba(233,69,96,.3);border-radius:6px;color:#fff;padding:8px 10px;font:12px/1.4 'Consolas','Monaco',monospace}
+        .TAF-textarea{resize:vertical;min-height:64px}
+        .TAF-input:focus,.TAF-textarea:focus{outline:none;border-color:#e94560}
+        #TAF-save{width:100%;margin-top:10px;background:#e94560;color:#fff}
+        #TAF-save:hover{background:#c73e54}
+        #TAF-log{background:rgba(0,0,0,.3);border-radius:8px;padding:12px;height:180px;overflow-y:auto;font-size:11px;font-family:'Consolas','Monaco',monospace}
+        .TAF-log-entry{padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+        .TAF-log-entry:last-child{border-bottom:none}
+        .TAF-log-time{color:#95a5a6;margin-right:8px}
+        .TAF-log-success{color:#2ecc71}
+        .TAF-log-info{color:#3498db}
+        .TAF-log-warning{color:#f39c12}
+        .TAF-log-system{color:#e94560}
+        .TAF-log-farm{color:#e67e22}
+        #TAF-footer{padding:12px 16px;background:rgba(0,0,0,.2);text-align:center;font-size:10px;color:#95a5a6}
+        #TAF-footer a{color:#e94560;text-decoration:none}
+        #TAF-log::-webkit-scrollbar{width:6px}
+        #TAF-log::-webkit-scrollbar-thumb{background:rgba(233,69,96,.5);border-radius:3px}
+        #TAF-fab{position:fixed;left:20px;bottom:20px;width:52px;height:52px;border:none;border-radius:50%;cursor:pointer;font-size:24px;background:linear-gradient(135deg,#e94560 0%,#f27121 100%);box-shadow:0 6px 20px rgba(0,0,0,.5);z-index:999998}
+        #TAF-fab[hidden]{display:none}
+        .TAF-toast{position:fixed;top:80px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#0f3460 0%,#16213e 100%);border:1px solid #e94560;border-radius:8px;padding:10px 16px;color:#fff;font:12px 'Consolas','Monaco',monospace;box-shadow:0 6px 20px rgba(0,0,0,.5);z-index:9999999}
     `;
 
     const gui = document.createElement('div');
-    gui.id = 'Twitchy-autoclicker';
+    gui.id = 'TAF-panel';
     if (CONFIG.minimized) gui.classList.add('minimized');
     gui.innerHTML = `
-        <div id="Twitchy-header">
-            <div id="Twitchy-title"><div id="Twitchy-logo">🎁</div><span>Twitch AutoFarm</span></div>
-            <div id="Twitchy-controls">
-                <button id="Twitchy-toggle" class="Twitchy-btn">START</button>
-                <button id="Twitchy-settings" class="Twitchy-btn" title="Settings">⚙</button>
-                <button id="Twitchy-hide" class="Twitchy-btn">HIDE</button>
-                <button id="Twitchy-minimize" class="Twitchy-btn">${CONFIG.minimized ? '+' : '−'}</button>
+        <div id="TAF-header">
+            <div id="TAF-title"><div id="TAF-logo">🎁</div><span>Twitch Drops Farm</span></div>
+            <div id="TAF-controls">
+                <button id="TAF-toggle" class="TAF-btn">START</button>
+                <button id="TAF-settings" class="TAF-btn" title="Settings">⚙</button>
+                <button id="TAF-hide" class="TAF-btn">HIDE</button>
+                <button id="TAF-minimize" class="TAF-btn">${CONFIG.minimized ? '+' : '−'}</button>
             </div>
         </div>
-        <div id="Twitchy-content">
-            <div id="Twitchy-status">
-                <div id="Twitchy-status-text">Ready to start...</div>
-                <div id="Twitchy-uptime">Uptime: 00:00:00</div>
+        <div id="TAF-content">
+            <div id="TAF-status">
+                <div id="TAF-status-text">Ready to start...</div>
+                <div id="TAF-uptime">Uptime: 00:00:00</div>
             </div>
-            <div id="Twitchy-farm-status" hidden>
-                <div class="Twitchy-farm-game" id="Twitchy-farm-game">-</div>
-                <div class="Twitchy-farm-stream" id="Twitchy-farm-stream">-</div>
-                <div class="Twitchy-farm-progress"><div class="Twitchy-farm-progress-bar" id="Twitchy-farm-progress" style="width:0%">0%</div></div>
-                <div class="Twitchy-farm-time" id="Twitchy-farm-time">Осталось: --:--:--</div>
+            <div id="TAF-farm-status" hidden>
+                <div class="TAF-farm-game" id="TAF-farm-game">-</div>
+                <div class="TAF-farm-stream" id="TAF-farm-stream">-</div>
+                <div class="TAF-farm-progress"><div class="TAF-farm-progress-bar" id="TAF-farm-progress" style="width:0%">0%</div></div>
+                <div class="TAF-farm-time" id="TAF-farm-time">Осталось: --:--:--</div>
             </div>
-            <div id="Twitchy-queue" hidden><div class="Twitchy-queue-title">Очередь фарма</div><div id="Twitchy-queue-list"></div></div>
-            <div id="Twitchy-stats">
-                <div class="Twitchy-stat"><div class="Twitchy-stat-label">Drops Claimed</div><div class="Twitchy-stat-value" id="Twitchy-claimed">0</div></div>
-                <div class="Twitchy-stat"><div class="Twitchy-stat-label">Streams Watched</div><div class="Twitchy-stat-value" id="Twitchy-streams">0</div></div>
+            <div id="TAF-queue" hidden><div class="TAF-queue-title">Очередь фарма</div><div id="TAF-queue-list"></div></div>
+            <div id="TAF-stats">
+                <div class="TAF-stat"><div class="TAF-stat-label">Drops Claimed</div><div class="TAF-stat-value" id="TAF-claimed">0</div></div>
+                <div class="TAF-stat"><div class="TAF-stat-label">Streams Watched</div><div class="TAF-stat-value" id="TAF-streams">0</div></div>
             </div>
-            <div id="Twitchy-connect" hidden></div>
-            <div id="Twitchy-settings-panel" hidden>
-                <label class="Twitchy-field-label">Whitelist (по одной на строку, пусто = все)</label>
-                <textarea class="Twitchy-textarea" id="Twitchy-whitelist"></textarea>
-                <label class="Twitchy-field-label">Ротация стримов (мин, 0 = выкл)</label>
-                <input class="Twitchy-input" id="Twitchy-rotation" type="number" min="0" max="60" step="5">
-                <label class="Twitchy-field-label">Проверка прогресса (сек)</label>
-                <input class="Twitchy-input" id="Twitchy-check" type="number" min="10" max="120" step="10">
-                <label class="Twitchy-field-label">Мин зрителей</label>
-                <input class="Twitchy-input" id="Twitchy-viewers" type="number" min="0" max="10000" step="10">
-                <label class="Twitchy-field-label">Режим подключения аккаунтов</label>
-                <select class="Twitchy-input" id="Twitchy-connect-mode">
+            <div id="TAF-connect" hidden></div>
+            <div id="TAF-settings-panel" hidden>
+                <label class="TAF-field-label">Whitelist (по одной на строку, пусто = все)</label>
+                <textarea class="TAF-textarea" id="TAF-whitelist"></textarea>
+                <label class="TAF-field-label">Ротация стримов (мин, 0 = выкл)</label>
+                <input class="TAF-input" id="TAF-rotation" type="number" min="0" max="60" step="5">
+                <label class="TAF-field-label">Проверка прогресса (сек)</label>
+                <input class="TAF-input" id="TAF-check" type="number" min="10" max="120" step="10">
+                <label class="TAF-field-label">Мин зрителей</label>
+                <input class="TAF-input" id="TAF-viewers" type="number" min="0" max="10000" step="10">
+                <label class="TAF-field-label">Режим подключения аккаунтов</label>
+                <select class="TAF-input" id="TAF-connect-mode">
                     <option value="notify">Только уведомлять</option>
                     <option value="open">Открывать вкладку</option>
                     <option value="redirect">Перенаправлять</option>
                 </select>
-                <button id="Twitchy-save" class="Twitchy-btn">SAVE</button>
+                <label class="TAF-field-label">Автостарт при загрузке (после первой настройки)</label>
+                <select class="TAF-input" id="TAF-autostart">
+                    <option value="0">Выкл — запуск только кнопкой START</option>
+                    <option value="1">Вкл — стартовать сам после настройки</option>
+                </select>
+                <button id="TAF-save" class="TAF-btn">SAVE</button>
             </div>
-            <div id="Twitchy-log"></div>
+            <div id="TAF-log"></div>
         </div>
-        <div id="Twitchy-footer">Developed by <a href="https://github.com/ZeroStalker3" target="_blank" rel="noopener">ZeroYz</a></div>
+        <div id="TAF-footer">Developed by <a href="https://github.com/ZeroStalker3" target="_blank" rel="noopener">ZeroYz</a></div>
     `;
     
     const fab = document.createElement('button');
-    fab.id = 'Twitchy-fab';
-    fab.textContent = '';
+    fab.id = 'TAF-fab';
+    fab.textContent = '🎁';
     fab.hidden = true;
     
     document.head.appendChild(style);
@@ -264,28 +268,28 @@
     
     if (CONFIG.position) {
         gui.style.top = CONFIG.position.top;
-        gui.style.right = CONFIG.position.right;
+        gui.style.left = CONFIG.position.left;
     }
 
     const $ = (id) => document.getElementById(id);
     const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    const logBox = $('Twitchy-log');
+    const logBox = $('TAF-log');
     
     const LOG_TYPES = { system: 'system', info: 'info', claim: 'success', warn: 'warning', error: 'warning', farm: 'farm' };
     
     const log = (msg, type = 'info') => {
         const row = document.createElement('div');
-        row.className = 'Twitchy-log-entry';
-        row.innerHTML = `<span class="Twitchy-log-time">${new Date().toLocaleTimeString('ru-RU', { hour12: false })}</span><span class="Twitchy-log-${LOG_TYPES[type] || 'info'}">${esc(msg)}</span>`;
+        row.className = 'TAF-log-entry';
+        row.innerHTML = `<span class="TAF-log-time">${new Date().toLocaleTimeString('ru-RU', { hour12: false })}</span><span class="TAF-log-${LOG_TYPES[type] || 'info'}">${esc(msg)}</span>`;
         logBox.appendChild(row);
         logBox.scrollTop = logBox.scrollHeight;
         while (logBox.children.length > 100) logBox.firstChild.remove();
-        console.log('%c[TwitchFarm]', 'color:#9b59b6;font-weight:bold', msg);
+        console.log('%c[TAF]', 'color:#e94560;font-weight:bold', msg);
     };
     
     const toast = (msg) => {
         const t = document.createElement('div');
-        t.className = 'Twitchy-toast';
+        t.className = 'TAF-toast';
         t.textContent = msg;
         document.body.appendChild(t);
         setTimeout(() => t.remove(), 4000);
@@ -296,22 +300,22 @@
     const fmtUptime = (s) => [s / 3600, s / 60 % 60, s % 60].map(n => String(Math.floor(n)).padStart(2, '0')).join(':');
 
     const updateStats = () => {
-        $('Twitchy-claimed').textContent = stats.claimed;
-        $('Twitchy-streams').textContent = stats.streams;
+        $('TAF-claimed').textContent = stats.claimed;
+        $('TAF-streams').textContent = stats.streams;
     };
     
     const updateQueue = () => {
-        $('Twitchy-queue').hidden = !farm.queue.length;
-        $('Twitchy-queue-list').innerHTML = farm.queue.map(g => `<div class="Twitchy-queue-item">${esc(g.game)}</div>`).join('');
+        $('TAF-queue').hidden = !farm.queue.length;
+        $('TAF-queue-list').innerHTML = farm.queue.map(g => `<div class="TAF-queue-item">${esc(g.game)}</div>`).join('');
     };
 
     const updateFarmStatus = () => {
         const cur = farm.current;
-        $('Twitchy-farm-status').hidden = !cur;
+        $('TAF-farm-status').hidden = !cur;
         if (!cur) return;
         
-        $('Twitchy-farm-game').textContent = cur.game;
-        $('Twitchy-farm-stream').textContent = cur.streamUrl || 'Поиск стрима...';
+        $('TAF-farm-game').textContent = cur.game;
+        $('TAF-farm-stream').textContent = cur.streamUrl || 'Поиск стрима...';
         
         let displayRem = rt.domRemaining;
         let displayPct = rt.domPct;
@@ -335,30 +339,30 @@
             remain = Math.max(0, cur.watchTime - elapsed);
         }
         
-        $('Twitchy-farm-progress').style.width = pct + '%';
-        $('Twitchy-farm-progress').textContent = Math.floor(pct) + '%';
-        $('Twitchy-farm-time').textContent = 'Осталось: ' + fmtUptime(Math.floor(remain));
+        $('TAF-farm-progress').style.width = pct + '%';
+        $('TAF-farm-progress').textContent = Math.floor(pct) + '%';
+        $('TAF-farm-time').textContent = 'Осталось: ' + fmtUptime(Math.floor(remain));
     };
 
     const setRunning = (on) => {
         sessionStorage.setItem(SS_RUN, on ? '1' : '0');
-        $('Twitchy-toggle').textContent = on ? 'STOP' : 'START';
-        $('Twitchy-toggle').classList.toggle('running', on);
-        $('Twitchy-status-text').textContent = on ? 'Running — farming drops' : 'Stopped';
-        $('Twitchy-status-text').classList.toggle('active', on);
+        $('TAF-toggle').textContent = on ? 'STOP' : 'START';
+        $('TAF-toggle').classList.toggle('running', on);
+        $('TAF-status-text').textContent = on ? 'Running — farming drops' : 'Stopped';
+        $('TAF-status-text').classList.toggle('active', on);
         log(on ? 'Started farming' : 'Stopped farming', 'system');
         if (on) setTimeout(tick, 500);
     };
 
-    $('Twitchy-toggle').onclick = () => setRunning(!isRunning());
+    $('TAF-toggle').onclick = () => setRunning(!isRunning());
     
-    $('Twitchy-minimize').onclick = () => {
+    $('TAF-minimize').onclick = () => {
         CONFIG.minimized = gui.classList.toggle('minimized');
-        $('Twitchy-minimize').textContent = CONFIG.minimized ? '+' : '−';
+        $('TAF-minimize').textContent = CONFIG.minimized ? '+' : '−';
         saveConfig();
     };
     
-    $('Twitchy-hide').onclick = () => {
+    $('TAF-hide').onclick = () => {
         gui.style.display = 'none';
         fab.hidden = false;
     };
@@ -368,31 +372,34 @@
         fab.hidden = true;
     };
     
-    $('Twitchy-settings').onclick = () => {
-        const p = $('Twitchy-settings-panel');
+    $('TAF-settings').onclick = () => {
+        const p = $('TAF-settings-panel');
         p.hidden = !p.hidden;
         if (!p.hidden) {
-            $('Twitchy-whitelist').value = CONFIG.whitelist.join('\n');
-            $('Twitchy-rotation').value = CONFIG.streamRotationMin;
-            $('Twitchy-check').value = CONFIG.checkIntervalSec;
-            $('Twitchy-viewers').value = CONFIG.minViewers;
-            $('Twitchy-connect-mode').value = CONFIG.connectMode;
+            $('TAF-whitelist').value = CONFIG.whitelist.join('\n');
+            $('TAF-rotation').value = CONFIG.streamRotationMin;
+            $('TAF-check').value = CONFIG.checkIntervalSec;
+            $('TAF-viewers').value = CONFIG.minViewers;
+            $('TAF-connect-mode').value = CONFIG.connectMode;
+            $('TAF-autostart').value = CONFIG.autoStart ? '1' : '0';
         }
     };
     
-    $('Twitchy-save').onclick = () => {
-        CONFIG.whitelist = $('Twitchy-whitelist').value.split('\n').map(s => s.trim()).filter(Boolean);
-        CONFIG.streamRotationMin = Math.min(60, Math.max(0, parseInt($('Twitchy-rotation').value, 10) || 0));
-        CONFIG.checkIntervalSec = Math.min(120, Math.max(10, parseInt($('Twitchy-check').value, 10) || 30));
-        CONFIG.minViewers = Math.min(10000, Math.max(0, parseInt($('Twitchy-viewers').value, 10) || 0));
-        CONFIG.connectMode = $('Twitchy-connect-mode').value;
+    $('TAF-save').onclick = () => {
+        CONFIG.whitelist = $('TAF-whitelist').value.split('\n').map(s => s.trim()).filter(Boolean);
+        CONFIG.streamRotationMin = Math.min(60, Math.max(0, parseInt($('TAF-rotation').value, 10) || 0));
+        CONFIG.checkIntervalSec = Math.min(120, Math.max(10, parseInt($('TAF-check').value, 10) || 30));
+        CONFIG.minViewers = Math.min(10000, Math.max(0, parseInt($('TAF-viewers').value, 10) || 0));
+        CONFIG.connectMode = $('TAF-connect-mode').value;
+        CONFIG.autoStart = $('TAF-autostart').value === '1';
+        localStorage.setItem('taf_configured', '1'); 
         saveConfig();
         log('Settings saved', 'system');
-        toast('💾 Настройки сохранены');
+        toast('💾 Настройки сохранены — можно жать START');
     };
     
     let drag = null;
-    $('Twitchy-header').addEventListener('mousedown', (e) => {
+    $('TAF-header').addEventListener('mousedown', (e) => {
         if (e.target.closest('button')) return;
         const r = gui.getBoundingClientRect();
         drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
@@ -401,20 +408,20 @@
     document.addEventListener('mousemove', (e) => {
         if (!drag) return;
         gui.style.top = Math.max(0, e.clientY - drag.dy) + 'px';
-        gui.style.right = Math.max(0, innerWidth - e.clientX - drag.dx) + 'px';
+        gui.style.left = Math.max(0, e.clientX - drag.dx) + 'px';
     });
     
     document.addEventListener('mouseup', () => {
         if (!drag) return;
         drag = null;
-        CONFIG.position = { top: gui.style.top, right: gui.style.right };
+        CONFIG.position = { top: gui.style.top, left: gui.style.left };
         saveConfig();
     });
     
     let uptime = 0;
     setInterval(() => {
         if (isRunning()) {
-            $('Twitchy-uptime').textContent = 'Uptime: ' + fmtUptime(++uptime);
+            $('TAF-uptime').textContent = 'Uptime: ' + fmtUptime(++uptime);
             updateFarmStatus();
         }
     }, 1000);
@@ -442,7 +449,6 @@
         return seg.length === 1 && !RESERVED.includes(seg[0]);
     };
 
-    // ===== ПАРСИНГ ИНВЕНТАРЯ =====
     const parseInventory = () => {
         const campaigns = [];
         log('Парсинг инвентаря...', 'info');
@@ -469,8 +475,6 @@
                 const allLinks = hintText.querySelectorAll('a[href]');
                 for (const link of allLinks) {
                     const href = link.getAttribute('href');
-                    
-                    // Ищем ссылки вида /channelname или https://www.twitch.tv/channelname
                     const match = href.match(/twitch\.tv\/([^?/]+)|\/([^?/]+)$/);
                     if (match) {
                         const channel = match[1] || match[2];
@@ -498,13 +502,11 @@
                 log(`Блок ${i}: найдено каналов: ${specificChannels.join(', ')}`, 'info');
             }
             
-            // Whitelist
             if (!isWhitelisted(gameName, '') && !isWhitelisted(slugName, '')) {
                 log(`Блок ${i}: ${gameName} (${slugName}) не в whitelist`, 'info');
                 continue;
             }
             
-            // Проверяем реальный прогресс вместо farm.done
             const progressBars = block.querySelectorAll('[role="progressbar"][aria-valuenow]');
             let targetRemMin = Infinity;
             let targetPct = 0;
@@ -536,8 +538,6 @@
                             targetRemMin = remainingMin;
                             targetPct = pct;
                         }
-                    } else if (pct >= 100) {
-                        // Этот дроп завершен, но могут быть другие
                     }
                 }
             }
@@ -551,7 +551,7 @@
                 campaigns.push({
                     game: gameName,
                     slug,
-                    channels: specificChannels, // Добавляем список каналов
+                    channels: specificChannels,
                     watchTime: targetRemMin * 60,
                     currentPct: targetPct,
                     remainingMin: targetRemMin
@@ -567,27 +567,6 @@
         return campaigns;
     };
 
-    // ===== ФАЗА: INVENTORY (НОВАЯ) =====
-    const onInventoryPhase = async () => {
-        log('Проверка инвентаря...', 'farm');
-        await sleep(2000);
-        
-        const campaigns = parseInventory();
-        
-        if (campaigns.length > 0) {
-            log(`Найдено активных дропов в инвентаре: ${campaigns.length}`, 'farm');
-            farm.queue = campaigns;
-            farm.tried = {};
-            farm.phase = 'dir';
-            saveFarm();
-            updateQueue();
-            nextFromQueue();
-        } else {
-            log('Нет активных дропов в инвентаре, сканирую кампании...', 'info');
-            go(CAMPAIGNS_URL);
-        }
-    };
-
     const checkActiveDrops = () => {
         const watchSection = [...document.querySelectorAll('p')].find(p => 
             /^(смотреть|watch) drops$/i.test((p.textContent || '').trim())
@@ -597,7 +576,6 @@
             return { hasWatchDrops: false, rem: null, pct: null, claimReady: false };
         }
         
-        // Проверяем наличие кнопки "Получить"
         const claimBtn = [...document.querySelectorAll('[data-a-target="tw-core-button-label-text"]')]
             .find(el => /получить|claim/i.test(el.textContent || ''));
         
@@ -680,7 +658,7 @@
             
             await sleep(2000);
             
-            const drops = [];
+            const drops = [], conns = [];
             for (const head of document.querySelectorAll('div.accordion-header')) {
                 const btn = head.querySelector('button');
                 if (btn?.getAttribute('aria-expanded') !== 'true') continue;
@@ -690,6 +668,14 @@
                 if (farm.done.includes(info.game) || isDoneGlobal(info.game)) continue;
                 
                 const root = head.parentElement;
+                
+                const conn = [...root.querySelectorAll('a [data-a-target="tw-core-button-label-text"]')]
+                    .find(l => ['подключить', 'connect'].includes(norm(l.textContent)));
+                if (conn) {
+                    conns.push({ game: info.game, url: conn.closest('a').href, el: conn.closest('a') });
+                    continue;
+                }
+                
                 const link = root.querySelector('a[href*="/directory/category/"]');
                 if (!link) continue;
                 
@@ -710,6 +696,7 @@
                 return;
             }
             
+            handleConnections(conns);
             log(`Найдено дропов: ${drops.length} (${drops.map(d => d.game).join(', ')})`, 'farm');
             farm.queue = drops;
             farm.tried = {};
@@ -764,12 +751,10 @@
         const out = [];
         const seen = new Set();
         
-        // Если есть предпочтительные каналы, ищем их в первую очередь
         if (preferredChannels.length > 0) {
             for (const channel of preferredChannels) {
                 if (seen.has(channel)) continue;
                 
-                // Ищем карточку канала
                 const channelLink = scope.querySelector(`a[href="/${channel}"]`);
                 if (channelLink) {
                     const card = channelLink.closest('article') || channelLink.parentElement?.parentElement;
@@ -782,7 +767,6 @@
             }
         }
         
-        // Ищем остальные стримы
         for (const a of scope.querySelectorAll('a[href]')) {
             if (a.closest('nav,aside,footer,[data-a-target="side-nav"]')) continue;
             
@@ -799,7 +783,6 @@
             out.push({ url: 'https://www.twitch.tv/' + slug, viewers: parseViewers(card), isPreferred: false });
         }
         
-        // Сортируем: сначала предпочтительные каналы, потом по зрителям
         return out.sort((a, b) => {
             if (a.isPreferred && !b.isPreferred) return -1;
             if (!a.isPreferred && b.isPreferred) return 1;
@@ -831,6 +814,20 @@
         const pick = streams.find(s => !tried.includes(s.url));
         
         if (!pick) {
+            if (streams.length > 0) {
+                log(`Все стримы перепробованы для ${farm.current.game} — сброс`, 'warn');
+                farm.tried[farm.current.game] = [];
+                saveFarm();
+                const retry = streams[0];
+                farm.tried[farm.current.game].push(retry.url);
+                farm.current.streamUrl = retry.url;
+                farm.current.startedAt = Date.now();
+                farm.phase = 'watch';
+                saveFarm();
+                log(`Переход на стрим (retry): ${retry.url}`, 'farm');
+                go(retry.url);
+                return;
+            }
             log(`Нет доступных стримов для ${farm.current.game}`, 'warn');
             nextFromQueue();
             return;
@@ -855,7 +852,18 @@
             clearInterval(rt.countdownInterval);
             rt.countdownInterval = null;
         }
-        log(`Ротация: ${reason}`, 'warn');
+        
+        if (farm.current?.streamUrl && farm.current?.game) {
+            const game = farm.current.game;
+            farm.tried[game] = farm.tried[game] || [];
+            if (!farm.tried[game].includes(farm.current.streamUrl)) {
+                farm.tried[game].push(farm.current.streamUrl);
+            }
+            log(`Ротация: ${reason} (исключён: ${farm.current.streamUrl.split('/').pop()})`, 'warn');
+        } else {
+            log(`Ротация: ${reason}`, 'warn');
+        }
+        
         farm.phase = 'dir';
         farm.current.streamUrl = null;
         farm.current.startedAt = null;
@@ -927,7 +935,6 @@
                 
                 video.addEventListener('pause', () => {
                     if (isRunning() && farm.phase === 'watch') {
-                        log('Видео поставлено на паузу - возобновляем', 'warn');
                         setTimeout(() => {
                             if (video.paused) video.play().catch(() => {});
                         }, 1000);
@@ -1102,13 +1109,11 @@
         log('Проверка инвентаря...', 'farm');
         await sleep(2000);
 
-        // СНАЧАЛА проверяем активные дропы в инвентаре
         const campaigns = parseInventory();
         
         if (campaigns.length > 0) {
             log(`Найдено активных дропов: ${campaigns.length}`, 'farm');
             
-            // ПЕРЕД фармом пробуем забрать готовые дропы
             await tryClaimReadyDrops();
             
             farm.queue = campaigns;
@@ -1120,22 +1125,18 @@
             return;
         }
 
-        // Если активных нет, проверяем награды для получения
         log('Нет активных дропов, проверяю награды...', 'info');
         await sleep(1000);
         
         await tryClaimReadyDrops();
         
-        // После клейма идем на кампании
         log('Перехожу на страницу кампаний...', 'info');
         setTimeout(() => go(CAMPAIGNS_URL), 2000);
     };
     
-    // ===== КЛЕЙМ ГОТОВЫХ ДРОПОВ В ИНВЕНТАРЕ =====
     const tryClaimReadyDrops = async () => {
         let claimed = 0;
         
-        // 1. Кнопки "Получить сейчас" (новые, прямо в инвентаре)
         const claimNowBtns = [...document.querySelectorAll('button')]
             .filter(b => /получить сейчас|claim now/i.test(b.textContent || ''));
         
@@ -1147,7 +1148,6 @@
             await sleep(1500);
         }
         
-        // 2. Стандартные кнопки "Получить" / "Claim"
         const claimBtns = [
             ...document.querySelectorAll('button[data-a-target="claim-drop-button"], button[data-a-target="DropsClaimButton"]'),
             ...[...document.querySelectorAll('button')].filter(b => {
@@ -1168,10 +1168,39 @@
             updateStats();
             log(`Получено наград: ${claimed}`, 'claim');
             toast(`🎁 Получено наград: ${claimed}`);
-            await sleep(2000); // Ждём обновления страницы
+            await sleep(2000);
         }
         
         return claimed;
+    };
+
+    // ===== ПОДКЛЮЧЕНИЕ АККАУНТОВ =====
+    const connKey = (url) => 'taf_conn_' + url;
+    const isCooledDown = (url) => Date.now() - (+sessionStorage.getItem(connKey(url)) || 0) < CONFIG.connectCooldownMin * 60000;
+    
+    const renderConnectPanel = (pending) => {
+        const box = $('TAF-connect');
+        box.hidden = !pending.length;
+        if (pending.length) {
+            box.innerHTML = `<div class="TAF-connect-title">⚠ Требуется подключение</div>` +
+                pending.map(p => `<div class="TAF-connect-row"><span>${esc(p.game)}</span>${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">Открыть</a>` : ''}</div>`).join('');
+        }
+    };
+    
+    const handleConnections = (pending) => {
+        renderConnectPanel(pending);
+        const fresh = pending.filter(p => !notifiedConnections.has(p.game));
+        if (!fresh.length) return;
+        fresh.forEach(p => { 
+            notifiedConnections.add(p.game); 
+            log(`⚠ Требуется подключение: ${p.game}`, 'warn'); 
+        });
+        toast(`⚠ Требуется подключение: ${fresh.map(p => p.game).join(', ')}`);
+        const target = pending.find(p => p.url && !isCooledDown(p.url));
+        if (!target) return;
+        sessionStorage.setItem(connKey(target.url), String(Date.now()));
+        if (CONFIG.connectMode === 'redirect') setTimeout(() => location.assign(target.url), 2000);
+        else if (CONFIG.connectMode === 'open' && target.el) target.el.click();
     };
 
     let tickBusy = false;
@@ -1244,12 +1273,10 @@
         if (isRunning() && farm.phase === 'watch') {
             const video = document.querySelector('video');
             if (video) {
-                // Если видео на паузе - запускаем принудительно
                 if (video.paused || video.ended) {
                     log('Видео на паузе - возобновляем', 'info');
                     video.play().catch(() => {});
                 }
-                // Убеждаемся что muted правильно
                 if (video.muted !== CONFIG.muted) {
                     video.muted = CONFIG.muted;
                 }
@@ -1259,13 +1286,23 @@
     
     setInterval(tick, 15000);
 
+    const isConfigured = () => localStorage.getItem('taf_configured') === '1';
+
     if (isRunning()) {
-        $('Twitchy-toggle').textContent = 'STOP';
-        $('Twitchy-toggle').classList.add('running');
-        $('Twitchy-status-text').textContent = 'Running — farming drops';
-        $('Twitchy-status-text').classList.add('active');
+        $('TAF-toggle').textContent = 'STOP';
+        $('TAF-toggle').classList.add('running');
+        $('TAF-status-text').textContent = 'Running — farming drops';
+        $('TAF-status-text').classList.add('active');
+        log('♻️ Возобновляю работу после перезагрузки', 'system');
         setTimeout(tick, 2500);
-    } else if (CONFIG.autoStart) {
+    } else if (!isConfigured()) {
+        log('⚙ Настрой скрипт (⚙ → SAVE) и нажми START', 'system');
+        $('TAF-status-text').textContent = '⚙ Настрой и нажми START';
+    } else if (CONFIG.autoStart && isConfigured()) {
+        log('🚀 Автостарт после настройки', 'system');
         setRunning(true);
+    } else {
+        log('⏸ Остановлен — нажми START для запуска', 'system');
+        $('TAF-status-text').textContent = 'Stopped — press START';
     }
 })();
