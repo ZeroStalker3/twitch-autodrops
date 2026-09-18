@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Auto Farm Drops
 // @namespace    https://github.com/ZeroStalker3/twitch-autodrops
-// @version      2.5.0
+// @version      2.5.1
 // @description  Полная автоматизация фарма Twitch Drops: надежная логика, защита от ошибок, точный таймер
 // @author       ZeroYz
 // @match        *://*.twitch.tv/*
@@ -80,29 +80,28 @@
     const saveStats = () => localStorage.setItem(LS_STATS, JSON.stringify(stats));
     
     const LS_DONE = 'taf_done_global';
-    const DONE_TTL = 12 * 3600 * 1000;
-    
+    const DONE_TTL_COMPLETED = 12 * 3600 * 1000; 
+    const DONE_TTL_NOWATCH = 60 * 60 * 1000;     
+
     const doneGet = () => {
         try {
-            return JSON.parse(localStorage.getItem(LS_DONE) || '{}');
-        } catch {
-            return {};
-        }
+            const raw = JSON.parse(localStorage.getItem(LS_DONE) || '{}');
+            const out = {};
+            for (const k of Object.keys(raw)) {
+                const e = raw[k];
+                const t = typeof e === 'number' ? e : e?.t;         
+                const r = (typeof e === 'object' && e?.r) ? e.r : 'completed';
+                const ttl = r === 'completed' ? DONE_TTL_COMPLETED : DONE_TTL_NOWATCH;
+                if (t && Date.now() - t < ttl) out[k] = { t, r };
+            }
+            return out;
+        } catch { return {}; }
     };
-    
-    const doneSet = (game) => {
-        const d = doneGet();
-        for (const k of Object.keys(d)) {
-            if (Date.now() - d[k] > DONE_TTL) delete d[k];
-        }
-        d[game] = Date.now();
-        localStorage.setItem(LS_DONE, JSON.stringify(d));
-    };
-    
-    const isDoneGlobal = (game) => {
-        const t = doneGet()[game];
-        return !!t && Date.now() - t < DONE_TTL;
-    };
+    const doneSave = (d) => localStorage.setItem(LS_DONE, JSON.stringify(d));
+    const doneSet = (game, reason = 'completed') => { const d = doneGet(); d[game] = { t: Date.now(), r: reason }; doneSave(d); };
+    const doneReason = (game) => doneGet()[game]?.r || null;
+    const doneClear = (game) => { const d = doneGet(); delete d[game]; doneSave(d); };
+    const isDoneGlobal = (game) => !!doneGet()[game];
     
     const isRunning = () => sessionStorage.getItem(SS_RUN) === '1';
     const go = (url) => { location.href = url; };
@@ -124,6 +123,7 @@
         lastActivity: 0,
         countdownInterval: null,
         lastSync: 0,
+        lastAttempt: 0,
         syncAttempts: 0
     };
 
@@ -234,7 +234,7 @@
                 <label class="TAF-field-label">Whitelist (по одной на строку, пусто = все)</label>
                 <textarea class="TAF-textarea" id="TAF-whitelist"></textarea>
                 <label class="TAF-field-label">Ротация стримов (мин, 0 = выкл)</label>
-                <input class="TAF-input" id="TAF-rotation" type="number" min="0" max="60" step="5">
+                <input class="TAF-input" Аid="TAF-rotation" type="number" min="0" max="60" step="5">
                 <label class="TAF-field-label">Проверка прогресса (сек)</label>
                 <input class="TAF-input" id="TAF-check" type="number" min="10" max="120" step="10">
                 <label class="TAF-field-label">Мин зрителей</label>
@@ -251,6 +251,7 @@
                     <option value="1">Вкл — стартовать сам после настройки</option>
                 </select>
                 <button id="TAF-save" class="TAF-btn">SAVE</button>
+                <button id="TAF-reset-done" class="TAF-btn" style="width:100%;margin-top:8px;background:#f39c12;color:#fff">🗑 Сбросить список выбитых игр</button>
             </div>
             <div id="TAF-log"></div>
         </div>
@@ -398,6 +399,14 @@
         toast('💾 Настройки сохранены — можно жать START');
     };
     
+    $('TAF-reset-done').onclick = () => {
+        localStorage.removeItem(LS_DONE);
+        farm.done = [];
+        saveFarm();
+        log('🗑 Done-лист сброшен', 'system');
+        toast('🗑 Done-лист сброшен');
+    };
+
     let drag = null;
     $('TAF-header').addEventListener('mousedown', (e) => {
         if (e.target.closest('button')) return;
@@ -563,6 +572,19 @@
             }
         }
         
+        if (campaigns.length) {
+            let changed = false;
+            for (const c of campaigns) {
+                if (doneReason(c.game) === 'completed') {
+                    doneClear(c.game);
+                    farm.done = farm.done.filter(g => g !== c.game);
+                    changed = true;
+                    log(`♻️ ${c.game}: убрана из done-листа (есть активный прогресс)`, 'info');
+                }
+            }
+            if (changed) saveFarm();
+        }
+
         log(`Всего найдено активных кампаний: ${campaigns.length}`, 'info');
         return campaigns;
     };
@@ -599,10 +621,10 @@
         if (m) {
             rem = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
         } else {
-            m = title.match(/(?:ещё\s+)?(\d+)\s*(минут|мин|часов|часа|час|ч\.?)/i);
+            m = title.match(/(?:ещё\s+)?(\d+)\s*(минут|мин|часов|часа|час|ч\.?|minutes|minute|min|hours|hour|h)/i);
             if (m) {
                 const v = parseInt(m[1], 10);
-                rem = /час|hour|h/i.test(m[2]) && !/min|мин/i.test(m[2]) ? v * 60 : v;
+                rem = /ч|hour|h/i.test(m[2]) && !/min|мин/i.test(m[2]) ? v * 60 : v;
             }
         }
         
@@ -676,6 +698,23 @@
                     continue;
                 }
                 
+                const rootText = root.textContent || '';
+                const isWatch = /в течение|watch for|смотрите\s+\d+/i.test(rootText);
+
+                // Реконсиляция: страница кампаний доказывает наличие watch-дропов
+                if (doneReason(info.game) === 'nowatch') {
+                    if (!isWatch) continue;               // подтверждено: watch-дропов нет
+                    doneClear(info.game);
+                    farm.done = farm.done.filter(g => g !== info.game);
+                    saveFarm();
+                    log(`♻️ ${info.game}: убрана из done-листа (на странице есть watch-дропы)`, 'info');
+                }
+
+                if (!isWatch) {
+                    log(`⚠ ${info.game}: не watch-based (подписка/покупка) — пропускаю`, 'warn');
+                    continue;
+                }
+
                 const link = root.querySelector('a[href*="/directory/category/"]');
                 if (!link) continue;
                 
@@ -689,10 +728,11 @@
             }
             
             if (!drops.length) {
-                log('Нет активных дропов для фарма', 'info');
+                const doneList = Object.keys(doneGet()).filter(g => isDoneGlobal(g));
+                log(`Нет активных дропов. В done-листе: ${doneList.join(', ') || 'пусто'}`, 'info');
                 setTimeout(() => {
                     if (isRunning()) go(INVENTORY_URL);
-                }, 60000);
+                }, 10000);
                 return;
             }
             
@@ -1037,16 +1077,16 @@
                 rt.lastSync = now;
                 
                 if (!drops.hasWatchDrops) {
-                    rt.syncAttempts = (rt.syncAttempts || 0) + 1;
-                    log(`Нет watch-дропов (попытка ${rt.syncAttempts})`, 'warn');
-                    
-                    if (rt.syncAttempts >= 3) {
-                        log(`Нет watch-дропов для ${cur.game} — пропускаю`, 'warn');
-                        if (!farm.done.includes(cur.game)) {
-                            farm.done.push(cur.game);
-                            saveFarm();
-                        }
-                        doneSet(cur.game);
+                    const onStreamMs = Date.now() - (cur.startedAt || Date.now());
+                    if (onStreamMs > 45000 && Date.now() - (rt.lastAttempt || 0) > 20000) {
+                        rt.lastAttempt = Date.now();
+                        rt.syncAttempts = (rt.syncAttempts || 0) + 1;
+                        log(`Нет watch-дропов (попытка ${rt.syncAttempts}/5)`, 'warn');
+                    }
+                    if (rt.syncAttempts >= 5) {
+                        log(`Нет watch-дропов для ${cur.game} — пропускаю (nowatch, 1 час)`, 'warn');
+                        if (!farm.done.includes(cur.game)) { farm.done.push(cur.game); saveFarm(); }
+                        doneSet(cur.game, 'nowatch');
                         nextFromQueue();
                         return;
                     }
@@ -1137,6 +1177,7 @@
     const tryClaimReadyDrops = async () => {
         let claimed = 0;
         
+        // 1. Кнопки "Получить сейчас" (новые, прямо в инвентаре)
         const claimNowBtns = [...document.querySelectorAll('button')]
             .filter(b => /получить сейчас|claim now/i.test(b.textContent || ''));
         
@@ -1168,7 +1209,7 @@
             updateStats();
             log(`Получено наград: ${claimed}`, 'claim');
             toast(`🎁 Получено наград: ${claimed}`);
-            await sleep(2000);
+            await sleep(2000); // Ждём обновления страницы
         }
         
         return claimed;
