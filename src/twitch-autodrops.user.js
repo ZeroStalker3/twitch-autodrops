@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Auto Farm Drops (Autonomous)
 // @namespace    https://github.com/ZeroStalker3/twitch-autodrops
-// @version      3.0.0
+// @version      3.1.0
 // @description  Фарм Twitch Drops: проверенный DOM-парсинг + GQL fast-path, защита от циклов
 // @author       ZeroYz
 // @match        *://*.twitch.tv/*
@@ -118,9 +118,9 @@
             const hm = text.match(/(?<![\w:])(\d+)\s*:\s*(\d{1,2})(?!\d)/);
             if (hm) return parseInt(hm[1], 10) * 60 + parseInt(hm[2], 10);
             let total = 0, found = false;
-            const h = text.match(/(\d+)\s*(час|часа|часов|ч|hour|hours|hr|h)\b/i);
+            const h = text.match(/(\d+)\s*(часов|часа|час|ч|hours|hour|hr|h)(?![а-яёa-z0-9])/i);
             if (h) { total += parseInt(h[1], 10) * 60; found = true; }
-            const m = text.match(/(\d+)\s*(мин|минут|минуты|м|minute|minutes|min|m)\b/i);
+            const m = text.match(/(\d+)\s*(минут|минуты|мин|м|minutes|minute|min|m)(?![а-яёa-z0-9])/i);
             if (m) { total += parseInt(m[1], 10); found = true; }
             return found ? total : null;
         }
@@ -325,7 +325,7 @@
         if (CONFIG.minimized) gui.classList.add('minimized');
         gui.innerHTML = `
             <div id="TAF-header">
-                <div id="TAF-title"><div id="TAF-logo">🎁</div><span>TAF Autonomous v4.2.1</span></div>
+                <div id="TAF-title"><div id="TAF-logo">🎁</div><span>TAF Autonomous</span></div>
                 <div id="TAF-controls">
                     <button id="TAF-toggle" class="TAF-btn">START</button>
                     <button id="TAF-settings" class="TAF-btn">⚙</button>
@@ -362,7 +362,7 @@
                 </div>
                 <div id="TAF-log"></div>
             </div>
-            <div id="TAF-footer">TAF v4.2.1 by ZeroYz</div>
+            <div id="TAF-footer">TAF by ZeroYz</div>
         `;
         const fab = document.createElement('button');
         fab.id = 'TAF-fab'; fab.textContent = '🎁'; fab.hidden = true;
@@ -480,11 +480,12 @@
         return api;
     };
 
+    const normKey = s => (s || '').toLowerCase().replace(/[^a-z0-9а-яё]+/gi, ' ').replace(/\s+/g, ' ').trim();
     const isWhitelisted = (game, company) => {
         if (!CONFIG.whitelist.length) return true;
-        const g = Utils.norm(game), c = Utils.norm(company);
+        const g = normKey(game), c = normKey(company);
         return CONFIG.whitelist.some(w => {
-            const nw = Utils.norm(w); if (!nw) return false;
+            const nw = normKey(w); if (!nw) return false;
             return (g && (g.includes(nw) || nw.includes(g))) || (c && (c.includes(nw) || nw.includes(c)));
         });
     };
@@ -532,17 +533,20 @@
                 }
             }
 
-            if (!isWhitelisted(gameName, '') && !isWhitelisted(slugName, '')) continue;
-
+            const wlPass = isWhitelisted(gameName, '') || isWhitelisted(slugName, '');
             const progressBars = block.querySelectorAll('[role="progressbar"][aria-valuenow]');
+            Logger.info(`Блок ${i}: "${gameName}" | slug=${slug} | whitelist=${wlPass ? 'да' : 'нет'} | баров=${progressBars.length}`);
+            if (!wlPass) continue;
+
             let targetRemMin = Infinity, targetPct = 0, foundActive = false, allCompleted = true;
 
             for (const bar of progressBars) {
                 const pct = parseFloat(bar.getAttribute('aria-valuenow') || '0');
                 const text = bar.parentElement?.querySelector('[class*="CoreText"]')?.textContent || bar.parentElement?.textContent || '';
                 const totalMin = Utils.parseTimeFromText(text);
+                if (!totalMin && pct < 100) Logger.warn(`  бар pct=${pct}: время не распознано, текст="${text.slice(0, 60)}"`);
                 if (totalMin) {
-                    const isTotal = /\b(от|of)\s/i.test(text);
+                    const isTotal = /\s(от|of)\s/i.test(text);
                     const remainingMin = isTotal ? totalMin * (1 - pct / 100) : totalMin;
                     if (pct < 100 && remainingMin > 0) {
                         foundActive = true; allCompleted = false;
@@ -631,7 +635,8 @@
             if (!slug) continue;
 
             const tm = rootText.match(/(?:в течение|for)\s+(\d+)\s*(час|минут|hour|minute)/i);
-            const watchTime = tm ? (+tm[1]) * (/мин|minute/i.test(tm[2]) ? 60 : 3600) : (Utils.parseTimeFromText(rootText) || 60) * 60;
+            const totalMinEst = tm ? (+tm[1]) * (/мин|minute/i.test(tm[2]) ? 60 : 3600) : (Utils.parseTimeFromText(rootText) || 60);
+            const watchTime = totalMinEst * 60;
 
             const channels = [];
             const hint = root.querySelector('[data-test-selector*="hint"]') || root;
@@ -640,7 +645,7 @@
                 if (m && !RESERVED.includes(m[1])) channels.push(m[1]);
             }
 
-            drops.push({ game: info.game, slug, channels, watchTime });
+            drops.push({ game: info.game, slug, channels, watchTime, totalMin: totalMinEst, remainingMin: null, currentPct: null });
         }
 
         handleConnections(conns);
@@ -708,33 +713,30 @@
         if (cards.length) {
             const pick = (gameName && cards.find(c => c.text.includes(gameName))) || cards[0];
             let rem = Utils.parseTimeFromText(pick.text);
-            if (rem != null && /\b(от|of)\s/i.test(pick.text) && pick.pct != null) {
+            if (rem != null && /\s(от|of)\s/i.test(pick.text) && pick.pct != null) {
                 rem = rem * (1 - pick.pct / 100);
             }
             if (rem == null) rem = Utils.parseTimeFromText(pick.bar.getAttribute('aria-valuetext') || '');
             
-            if (rem == null && pick.pct != null) {
-                const cur = State.farm.current;
-                if (cur?.watchTime && cur?.currentPct != null && cur.currentPct > 0 && cur.currentPct < 100) {
-                    const remainingFromQueue = cur.watchTime / 60;
-                    const totalMin = remainingFromQueue / (1 - cur.currentPct / 100);
-                    rem = Math.max(0, totalMin * (1 - pick.pct / 100));
-                } else if (cur?.watchTime) {
-                    rem = cur.watchTime / 60;
-                }
+            if (rem == null && pick.pct != null && cur?.totalMin) {
+                rem = Math.max(0, cur.totalMin * (1 - pick.pct / 100));
             }
             
             if (rem != null) rem = Math.round(rem * 10) / 10;
             return { ...out, hasWatchDrops: true, rem, pct: pick.pct, claimReady: false };
         }
 
-        if (cur?.watchTime && cur.watchTime > 0) {
-            const rem = cur.watchTime / 60;
-            const pct = cur.currentPct != null ? cur.currentPct : 0;
-            Logger.info(`Fallback из очереди: rem=${rem.toFixed(1)} мин, pct=${pct}`, 2);
-            return { ...out, hasWatchDrops: true, rem: Math.round(rem * 10) / 10, pct, claimReady: false };
+        // Fallback B: убывающий остаток от значения, полученного в инвентаре
+        if (cur?.remainingMin != null && cur?.queuedAt) {
+            const rem = Math.max(0, cur.remainingMin - (Date.now() - cur.queuedAt) / 60000);
+            Logger.info(`Fallback queue-decay: rem=${rem.toFixed(1)} мин (на входе ${cur.remainingMin.toFixed(1)})`, 2);
+            return { ...out, hasWatchDrops: true, rem: Math.round(rem * 10) / 10, pct: cur.currentPct ?? null, claimReady: false };
         }
-
+        // Fallback C: полное время из инвентаря + процент из очереди
+        if (cur?.totalMin && cur?.currentPct != null) {
+            const rem = Math.max(0, cur.totalMin * (1 - cur.currentPct / 100));
+            return { ...out, hasWatchDrops: true, rem: Math.round(rem * 10) / 10, pct: cur.currentPct, claimReady: false };
+        }
         return out;
     };
 
@@ -1025,6 +1027,15 @@
         else if (CONFIG.connectMode === 'open') window.open(target.url, '_blank');
     };
 
+    const waitForRender = async (selector, timeoutMs = 15000) => {
+        const t0 = Date.now();
+        while (Date.now() - t0 < timeoutMs) {
+            if (document.querySelector(selector)) return true;
+            await Utils.sleep(1000);
+        }
+        return false;
+    };
+
     const onInventory = async (force = false) => {
         const f = State.farm;
         const now = Date.now();
@@ -1033,6 +1044,13 @@
 
         Logger.farm('Проверка инвентаря...');
         await Utils.sleep(2000);
+        // [FIX] Ждём реального рендера прогресс-баров, а не фиксированные 2с
+        const rendered = await waitForRender('[role="progressbar"][aria-valuenow]', 15000);
+        if (!rendered) {
+            Logger.warn('Инвентарь не отрендерен (нет прогресс-баров) — повторю на следующем тике');
+            f.lastInventoryScan = 0; State.saveFarm();
+            return;
+        }
         await tryClaimReadyDrops();
 
         let campaigns = [];
@@ -1065,7 +1083,13 @@
             Nav.go(INVENTORY_URL, true);
             return;
         }
-        f.current = { ...next, streamUrl: null, startedAt: null };
+        f.current = {
+            ...next,
+            streamUrl: null, startedAt: null, queuedAt: Date.now(),
+            totalMin: next.totalMin != null ? next.totalMin :
+                ((next.remainingMin != null && next.currentPct != null && next.currentPct < 100)
+                    ? next.remainingMin / (1 - next.currentPct / 100) : null)
+        };
         f.phase = 'dir'; State.saveFarm(); GUI.updateFarmStatus();
         Nav.go(`https://www.twitch.tv/directory/category/${next.slug}?filter=drops`, true);
     };
@@ -1116,9 +1140,10 @@
     const start = () => {
         GUI = createGUI();
         window.GUI = GUI;
-        Logger.system('🤖 TAF Autonomous v4.2.1 загружен');
+        Logger.system('🤖 TAF Autonomous загружен');
 
         window.TAF_DEBUG = () => {
+            window.TAF_OPS = OPS; window.TAF_MUTS = MUTS;
             const bars = [...document.querySelectorAll('[role="progressbar"][aria-valuenow]')].map(b => ({
                 pct: b.getAttribute('aria-valuenow'),
                 vt: b.getAttribute('aria-valuetext'),
