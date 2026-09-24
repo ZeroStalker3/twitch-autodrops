@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Auto Farm Drops (Autonomous)
 // @namespace    https://github.com/ZeroStalker3/twitch-autodrops
-// @version      3.1.0
+// @version      3.1.1
 // @description  Фарм Twitch Drops: проверенный DOM-парсинг + GQL fast-path, защита от циклов
 // @author       ZeroYz
 // @match        *://*.twitch.tv/*
@@ -672,13 +672,6 @@
         if (claimBtn) return { ...out, hasWatchDrops: true, rem: 0, pct: 100, claimReady: true };
 
         const cur = State.farm.current;
-        if (cur?.streamUrl && CONFIG.useGraphQL) {
-            const channelLogin = cur.streamUrl.split('/').pop();
-            const gqlProgress = await fetchStreamDropsProgress(channelLogin);
-            if (gqlProgress && gqlProgress.rem != null) {
-                return { ...out, hasWatchDrops: true, rem: Math.round(gqlProgress.rem * 10) / 10, pct: Math.round(gqlProgress.pct), claimReady: false };
-            }
-        }
 
         const timeRe = /(?:ещё\s+)?смотрите\s+\d|watch\s+\d|осталось\s+\d|\d+\s*(?:мин|ч|hour|min)|\d+\s*left/i;
         const earnRe = /чтобы\s|to earn|to receive|получить|получи|earn|receive/i;
